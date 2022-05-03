@@ -49,5 +49,41 @@
 /* Dimensiunea maxima a calupului de date */
 #define BUFLEN 1500
 #define MAX_CLIENTS 5
+#define ID_LEN 11
+#define MSG_LEN 50
+#define INFO_LEN 1500
+#define MAX_CLIENTS_NO 10
+#define TOPICS_LEN 10000
+#define MAX_SUBSCRIBERS 1000
 
+typedef struct message{
+    char topic[MSG_LEN];
+    uint8_t data_t;
+    char info[INFO_LEN];
+}message;
+
+typedef struct topic {
+    char topic[MSG_LEN];
+    int sf;
+} topic;
+
+typedef struct subscriber{
+    tcp_client *client;
+    topic *topics;
+    int nr_topics;
+} subscriber;
+
+typedef struct tcp_client {
+    char id[ID_LEN];
+    int sockfd;
+    int status;
+    message* msg;
+} tcp_client;
+
+typedef struct message_tcp {
+    struct sockaddr_in client_addr;
+    char topic[MSG_LEN];
+    uint8_t data_t;
+    char info[INFO_LEN];
+} message_tcp;
 #endif
