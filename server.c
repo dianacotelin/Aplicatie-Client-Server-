@@ -10,6 +10,8 @@
 int size;
 int topics_len;
 int subscribers_len;
+int max_number_of_topics = 100;
+int max_number_of_subscribers = 50;
 void usage(char *file)
 {
 	fprintf(stderr, "Usage: %s server_port\n", file);
@@ -31,8 +33,23 @@ int find_topic(char**topics, char*topic) {
     }
     return 0;
 }
-
+int find_topic_index (char *topic, int nr_topics, subscriber subscriber) {
+    for (int i = 0; i< nr_topics; i++) {
+        if (strcmp(subscriber.topics[i].topic, topic) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
 void add_topic (char **topics, char *topic) {
+    if (topics_len == max_number_of_topics) {
+        max_number_of_topics *= 2;
+        topics = realloc(topics, max_number_of_topics*sizeof(char));
+
+        for (int i = topics_len; i < max_number_of_topics; i++)
+            topics[i] = (char*)malloc(50 * sizeof(char));
+    }
+
     strcpy(topics[topics_len], topic);
     topics_len++;
 }
@@ -45,6 +62,62 @@ int is_subsc (subscriber subsc, char *topic) {
     }
 
     return 0;
+}
+
+void create_message(char* buffer, message msg, char ip[], int sock) {
+    char topic_name[MSG_LEN];
+    int type = buffer[50];
+
+    memset(topic_name, 0, MSG_LEN);
+    memcpy(topic_name, buffer, 50);
+    strcpy(msg.ip, ip);
+    strcpy(msg.topic, topic_name);
+    msg.sock = sock;
+
+    if(type == 0) {
+        uint32_t num;
+        strcpy(msg.data_t, "INT");
+        num = (uint32_t)buffer[52] << 24 | (uint32_t)buffer[53] << 16 | (uint32_t)buffer[54] << 8 |
+                (uint32_t)buffer[55];
+        signed long long int aux = num;
+        if (buffer[51] == 1) {
+            msg.case_int = -aux;
+        } else {
+            msg.case_int = aux;
+        }
+    }
+
+    if (type == 1) {
+        uint16_t num = 0;
+        strcpy(msg.data_t, "SHORT_REAL");
+        num = (uint16_t)buffer[51] << 8 | (uint16_t)buffer[52];
+        msg.case_short = num;
+    }
+
+    if (type == 2) {
+        strcpy(msg.data_t, "FLOAT");
+        uint32_t num = 0;
+        uint8_t aux = 0;
+        num = (uint32_t)buffer[52] << 24 | (uint32_t)buffer[53] << 16 | (uint32_t)buffer[54] << 8 |
+                (uint32_t)buffer[55];
+        aux = (uint8_t)buffer[56];
+        double exp = 1;
+        for (int i = 0; i < aux; i++) {
+            exp /= 10;
+        }
+        double aux2 = (double)num * exp;
+        if (buffer[51] == 1) {
+            msg.case_float = (double) -aux2;
+        } else {
+            msg.case_float = (double)aux2;
+        }
+    }
+    if (type == 3) {
+        strcpy(msg.data_t, "STRING");
+        memset(msg.case_string, 0, 1500);
+        memcpy(msg.case_string, buffer + 51, 1501);
+    }
+
 }
 
 int main(int argc, char *argv[]) {
@@ -108,10 +181,9 @@ int main(int argc, char *argv[]) {
     char buffer[BUFLEN];
     char id[ID_LEN];
 
-    message message_udp;
-    char **topics = (char**)malloc(TOPICS_LEN * sizeof(char*));
-    subscriber *subscribers = malloc(MAX_SUBSCRIBERS * sizeof(subscriber));
-    for (int i = 0; i < TOPICS_LEN; i++) {
+    char **topics = (char**)malloc(max_number_of_topics * sizeof(char*));
+    subscriber *subscribers = malloc(max_number_of_subscribers * sizeof(subscriber));
+    for (int i = 0; i < max_number_of_topics; i++) {
         topics[i] = (char*)malloc(50*sizeof(char));
     }
 
@@ -121,7 +193,7 @@ int main(int argc, char *argv[]) {
         DIE(ret < 0, "select");
 
         // STDIN data
-        if (FD_ISSET(0, &tmp_fds)) {
+        if (FD_ISSET(STDIN_FILENO, &tmp_fds)) {
             memset(buffer, 0, BUFLEN);
             fgets(buffer, BUFLEN - 1, stdin);
             // exit command
@@ -129,8 +201,6 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i <= fdmax; i++) {
                     if (FD_ISSET(i, &read_fds)) {
                         close(i);
-                        close(sockfd_tcp);
-                        close(sockfd_udp);
                     }
                 }
                 break;
@@ -139,16 +209,20 @@ int main(int argc, char *argv[]) {
 
         // UDP CLIENTS
         if (FD_ISSET(sockfd_udp, &tmp_fds)) {
-            memset(&message_udp, 0, sizeof(message));
+            memset(buffer, 0, BUFLEN);
             clilen = sizeof(cli_addr);
-
-            ret = recvfrom(sockfd_udp, &message_udp, sizeof(message), 0, (struct sockaddr *)&cli_addr, &clilen);
+            ret = recvfrom(sockfd_udp, buffer, sizeof(buffer), 0,(struct sockaddr *)&cli_addr, &clilen);
             DIE(ret < 0, "recvfrom");
+
+            
+            message msg_udp;
+            create_message(buffer, msg_udp, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
+
 
             message_tcp msg_tcp;
             memset(&msg_tcp, 0, sizeof(message_tcp));
             msg_tcp.client_addr = cli_addr;
-            memcpy(&(msg_tcp.topic), &(message_udp.topic), sizeof(message));
+            memcpy(&(msg_tcp.topic), &(msg_udp.topic), sizeof(message));
 
             // Search the topic, and add it if it dosen't exist
             if (! find_topic(topics, msg_tcp.topic)) {
@@ -156,15 +230,21 @@ int main(int argc, char *argv[]) {
             } else {
                 // Send messages to the subscribers of this topic
                 for (int i = 0; i < subscribers_len; i++) {
-                    if (is_subsc (subscribers[i], message_udp.topic)){
+                    if (is_subsc (subscribers[i], msg_udp.topic)){
                         if (subscribers[i].client->status == 1) {
-                            ret = send(subscribers[i].client->sockfd, &message_udp, sizeof(message_udp), 0);
+                            ret = send(subscribers[i].client->sockfd, &msg_udp, sizeof(msg_udp), 0);
                             DIE(ret < 0, "sendmsg");
 
                         } else if (subscribers[i].client->status == 0) {
-                            message_tcp *copy = (message_tcp *)calloc(1, sizeof(message_tcp));
-                            memcpy(copy, &msg_tcp, sizeof(message_tcp));
-                            queue_enq(subscribers[i].client->messages, copy);
+                            for (int j = 0; j < subscribers->nr_topics; j++) {
+                                if (strcmp (subscribers[i].topics[j].topic, msg_udp.topic) == 0) {
+                                    if (subscribers[i].topics[j].sf == 1) {
+                                        message_tcp *copy =(message_tcp *)calloc(1, sizeof(message_tcp));
+                                        memcpy(copy, &msg_tcp, sizeof(message_tcp));
+                                        queue_enq(subscribers[i].client->messages, copy);
+                                    }
+                                }
+                            }
 
                         }
                     }
@@ -216,8 +296,9 @@ int main(int argc, char *argv[]) {
 
                             subscribers_len++;
 
-                            if (subscribers_len == MAX_SUBSCRIBERS) {
-                                realloc(subscribers, (subscribers_len*2)*sizeof(subscriber));
+                            if (subscribers_len == max_number_of_subscribers) {
+                                max_number_of_subscribers *= 2;
+                                subscribers = realloc(subscribers, (max_number_of_subscribers)*sizeof(subscriber));
                             } 
                             printf("New client %s connected from %s:%i.\n", id, inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
 
@@ -254,7 +335,7 @@ int main(int argc, char *argv[]) {
                             int found;
 
                             for (int j = 0; j < subscribers_len; j++) {
-                                if (i == subscribers[j].client->id) {
+                                if (i == subscribers[j].client->sockfd) {
                                     found = j;
                                 }
                             }
@@ -264,6 +345,46 @@ int main(int argc, char *argv[]) {
                             printf("Client %s disconnected.\n", subscribers[found].client->id);
 
                         } else {
+                            topic *new_top = (topic *) malloc(sizeof(topic*));
+                            if (strncmp(buffer, "subscribe", strlen("subscribe") == 0)) {
+                                strncpy(new_top->topic, buffer, strlen(buffer) - 3);
+                                char sf[2];
+                                sf[0] = buffer[strlen(buffer) - 2];
+                                sf[1] = '\0';
+                                new_top->sf = atoi(sf);
+                                if (find_topic(topics, new_top->topic) == 0) {
+                                    add_topic(topics, new_top->topic);
+                                }
+
+                                for (int j = 0; j < subscribers_len; j++) {
+                                    if (subscribers[j].client->sockfd == i) {
+                                        if (is_subsc(subscribers[j], new_top->topic) == 0) {
+                                            int aux_nr = subscribers[j].nr_topics;
+                                            subscribers[j].nr_topics ++;
+                                            strcpy(subscribers[j].topics[aux_nr].topic, new_top->topic);
+                                            subscribers[j].topics[aux_nr].sf = new_top->sf;
+                                          
+                                        }
+                                        break;
+                                    }
+                                }
+
+                            } else if (strncmp(buffer, "unsubscribe", strlen("unsubscribe") == 0)) {
+                                for (int j = 0; j < subscribers_len; j++) {
+                                    if (subscribers[j].client->sockfd == i) {
+                                        if (is_subsc(subscribers[j], new_top->topic) == 0) {
+                                            int index = find_topic_index(new_top->topic, subscribers[j].nr_topics, subscribers[j]);
+                                            if (index >= 0) {
+                                                for (int k = index; k < subscribers[j].nr_topics -1; k++) {
+                                                    subscribers[j].topics[k] = subscribers[j].topics[k +1]; 
+                                                }
+                                                subscribers[j].nr_topics --;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
                             
                         }
                     }
@@ -273,9 +394,16 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-
-
-
+    for (int i = 0; i < subscribers_len; i++) {
+        free(subscribers[i].topics);
+    }
+    free (subscribers);
+    for (int i = 0; i < topics_len; i++) {
+        free(topics[i]);
+    }
+    free (topics);
+    close (sockfd_tcp);
+    close (sockfd_udp);
 
 
 
