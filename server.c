@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     res = setsockopt(sockfd_tcp, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
     DIE(res < 0, "Naglae");
 
-    int ret;
+    int ret, n;
     ret = bind(sockfd_tcp, (struct sockaddr *) &serv_addr, sizeof(struct sockaddr));
     DIE(ret < 0, "bind_tcp");
 
@@ -139,16 +139,16 @@ int main(int argc, char *argv[]) {
 
         // UDP CLIENTS
         if (FD_ISSET(sockfd_udp, &tmp_fds)) {
-            memset(&message_udp, 0, sizeof(message_udp));
+            memset(&message_udp, 0, sizeof(message));
             clilen = sizeof(cli_addr);
 
-            ret = recvfrom(sockfd_udp, &message_udp, sizeof(message_udp), 0, (struct sockaddr *)&cli_addr, &clilen);
+            ret = recvfrom(sockfd_udp, &message_udp, sizeof(message), 0, (struct sockaddr *)&cli_addr, &clilen);
             DIE(ret < 0, "recvfrom");
 
             message_tcp msg_tcp;
             memset(&msg_tcp, 0, sizeof(message_tcp));
             msg_tcp.client_addr = cli_addr;
-            memcpy(&(msg_tcp.topic), &(message_udp.topic), sizeof(message_udp));
+            memcpy(&(msg_tcp.topic), &(message_udp.topic), sizeof(message));
 
             // Search the topic, and add it if it dosen't exist
             if (! find_topic(topics, msg_tcp.topic)) {
@@ -188,9 +188,9 @@ int main(int argc, char *argv[]) {
                         int found = -1;
                         int status = -1;
                         for (int j = 0; j < subscribers_len; j++) {
-                            if (! strcmp(id, subscribers[i].client->id)) {
+                            if (! strcmp(id, subscribers[j].client->id)) {
                                 found = j;
-                                status = subscribers[i].client->status;
+                                status = subscribers[j].client->status;
                                 break;
                             }
                         }
@@ -203,16 +203,72 @@ int main(int argc, char *argv[]) {
                             if (newsockfd > fdmax) {
                                 fdmax = newsockfd;
                             }
+                            subscriber *new_subscriber = (subscriber *)calloc(1, sizeof(subscriber));
+                            DIE(new_subscriber == NULL, "new_client");
 
+                            memset(new_subscriber->client->id, 0, ID_LEN);
+                            memcpy(new_subscriber->client->id, id, strlen(id));
+
+                            new_subscriber->client->sockfd = sockfd_tcp;
+                            new_subscriber->client->status = 0;
+                            new_subscriber->client->messages = queue_create();
+                            memcpy(&(subscribers[subscribers_len]), new_subscriber, sizeof(subscriber));
+
+                            subscribers_len++;
+
+                            if (subscribers_len == MAX_SUBSCRIBERS) {
+                                realloc(subscribers, (subscribers_len*2)*sizeof(subscriber));
+                            } 
                             printf("New client %s connected from %s:%i.\n", id, inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
 
                             
                             
+                        } else if (status == -1) {
+                            // client reconectat
+                            FD_SET(newsockfd, &read_fds);
+                            subscribers[found].client->sockfd = newsockfd;
+                            subscribers[found].client->status = 1;
+
+                            while (!queue_empty(subscribers[found].client->messages)) {
+                                message *info = queue_deq(subscribers[found].client->messages);
+                                ret = send(subscribers[found].client->sockfd, info, sizeof(char), 0);
+                                DIE(ret < 0, "send_messages");
+                            }
+
+                        } else if (status == 1) {
+                            printf("Client %s already connected.\n", id);
+
                         }
 
                         
 
+                    } else {
+                        // s-au primit date pe unul din socketii de client,
+                        // asa ca serverul le receptioneaza
+
+                        memset(buffer, 0, BUFLEN);
+                        n = recv(i, buffer, sizeof(buffer), 0);
+                        DIE(n < 0, "recv");
+
+                        if (n == 0) {
+                            int found;
+
+                            for (int j = 0; j < subscribers_len; j++) {
+                                if (i == subscribers[j].client->id) {
+                                    found = j;
+                                }
+                            }
+                            subscribers[found].client->status = -1;
+                            close(i);
+                            FD_CLR(i, &read_fds);
+                            printf("Client %s disconnected.\n", subscribers[found].client->id);
+
+                        } else {
+                            
+                        }
                     }
+
+
                 }
             }
         }
