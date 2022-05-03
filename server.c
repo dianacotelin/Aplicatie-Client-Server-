@@ -2,9 +2,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <arpa/inet.h>
 #include "helpers.h"
 
@@ -139,7 +138,7 @@ int main(int argc, char *argv[]) {
 
         // UDP CLIENTS
         if (FD_ISSET(sockfd_udp, &tmp_fds)) {
-            memset(&message_udp, 0, sizepf(message_udp));
+            memset(&message_udp, 0, sizeof(message_udp));
             clilen = sizeof(cli_addr);
 
             ret = recvfrom(sockfd_udp, &message_udp, sizeof(message_udp), 0, (struct sockaddr *)&cli_addr, &clilen);
@@ -162,7 +161,9 @@ int main(int argc, char *argv[]) {
                             DIE(ret < 0, "sendmsg");
 
                         } else if (subscribers[i].client->status == 0) {
-                            // for (int j = 0; j<subscribers)
+                            message_tcp *copy = (message_tcp *)calloc(1, sizeof(message_tcp));
+                            memcpy(copy, &msg_tcp, sizeof(message_tcp));
+                            queue_enq(subscribers[i].client->messages, copy);
 
                         }
                     }

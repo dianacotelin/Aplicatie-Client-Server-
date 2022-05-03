@@ -28,6 +28,8 @@
 /* arphdr */
 #include <net/if_arp.h>
 #include <asm/byteorder.h>
+#include "queue.h"
+#include "list.h"
 
 /*
  * Macro de verificare a erorilor
@@ -67,18 +69,19 @@ typedef struct topic {
     int sf;
 } topic;
 
+typedef struct tcp_client {
+    char id[ID_LEN];
+    int sockfd;
+    int status;
+    queue messages;
+} tcp_client;
+
 typedef struct subscriber{
     tcp_client *client;
     topic *topics;
     int nr_topics;
 } subscriber;
 
-typedef struct tcp_client {
-    char id[ID_LEN];
-    int sockfd;
-    int status;
-    message* msg;
-} tcp_client;
 
 typedef struct message_tcp {
     struct sockaddr_in client_addr;
