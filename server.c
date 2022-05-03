@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
 
     struct sockaddr_in serv_addr, cli_addr;
     socklen_t clilen;
-    int clients[MAX_CLIENTS_NO];
+    int newsockfd;
 
     memset((char *) &serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
@@ -106,6 +106,7 @@ int main(int argc, char *argv[]) {
         fdmax = sockfd_udp;
     }
     char buffer[BUFLEN];
+    char id[ID_LEN];
 
     message message_udp;
     char **topics = (char**)malloc(TOPICS_LEN * sizeof(char*));
@@ -172,7 +173,48 @@ int main(int argc, char *argv[]) {
 
 
         } else {
+            // Client TCP
+            for (int i = 0; i<= fdmax; i++) {
+                if (FD_ISSET(i, &tmp_fds)) {
+                    if (i == sockfd_tcp) {
+                        // cerere de conexiune pe socket inactiv (listen)
+                        clilen = sizeof(cli_addr);
+                        newsockfd = accept(sockfd_tcp, (struct sockaddr *)&cli_addr, &clilen);
+                        DIE(newsockfd < 0, "accept");
 
+                        memset(id, 0, sizeof(id));
+                        ret = recv (newsockfd, id, sizeof(id), 0);
+                        DIE(ret < 0, "recv");
+                        int found = -1;
+                        int status = -1;
+                        for (int j = 0; j < subscribers_len; j++) {
+                            if (! strcmp(id, subscribers[i].client->id)) {
+                                found = j;
+                                status = subscribers[i].client->status;
+                                break;
+                            }
+                        }
+
+                        if (found == -1) {
+                            // client nou
+
+                            // se adauga un socket nou la multimea descriptorilor de citire
+                            FD_SET(newsockfd, &read_fds);
+                            if (newsockfd > fdmax) {
+                                fdmax = newsockfd;
+                            }
+
+                            printf("New client %s connected from %s:%i.\n", id, inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
+
+                            
+                            
+                        }
+
+                        
+
+                    }
+                }
+            }
         }
     }
 
