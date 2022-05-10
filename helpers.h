@@ -82,7 +82,7 @@ typedef struct tcp_client {
 } tcp_client;
 
 typedef struct subscriber{
-    tcp_client *client;
+    tcp_client client;
     topic topics[1000];
     int nr_topics;
 } subscriber;

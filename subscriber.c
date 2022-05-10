@@ -94,33 +94,42 @@ int main(int argc, char *argv[]) {
     }
 
 
-    FD_ZERO(&read_fds);
-    FD_ZERO(&tmp_fds);
-
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     DIE(sockfd < 0, "socket_tcp");
+    // Dezactivare alg Naglae
+    int flag = 1;
+    int res;
+    res = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    DIE(res < 0, "Naglae");
+
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(atoi(argv[3]));
     ret = inet_aton(argv[2], &serv_addr.sin_addr);
     DIE(ret == 0, "inet_aton");
 
-    // Dezactivare alg Naglae
-    int flag = 1;
-    int res;
+    
+    FD_ZERO(&read_fds);
+    FD_ZERO(&tmp_fds);
 
     ret = connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr));
     DIE(ret < 0, "connect");
-
-    res = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
-    DIE(res < 0, "Naglae");
 
     FD_SET(STDIN_FILENO, &read_fds);
     FD_SET(sockfd, &read_fds);
 
     fd_max = sockfd;
+    //printf("%s", id);
+    ret = send(sockfd, argv[1], 10, 0);
+    DIE (ret < 0, "send");
     
-    ret = send(sockfd, argv[1], strlen(argv[1] + 1), 0);
+    ret = recv(sockfd, buffer, BUFLEN, 0);
+    DIE (ret < 0, "recv");
+
+    if (strncmp (buffer, "quit", strlen("quit")) == 0) {
+        close(sockfd);
+        return 0;
+    }
 
     char messageS[BUFLEN];
 
@@ -136,6 +145,7 @@ int main(int argc, char *argv[]) {
             if (strncmp(buffer, "exit", 4) == 0) {
                 break;
             }
+
             int checkk = check_message(buffer, messageS);
 
             if (checkk >= 0) {
@@ -151,14 +161,11 @@ int main(int argc, char *argv[]) {
             }
         }
         if (FD_ISSET(sockfd, &tmp_fds)) {
+            // Date de la server
             message message_udp;
             ret = recv(sockfd, &message_udp, sizeof(message), 0);
             DIE(ret < 0, "receive");
-            if (ret == 0) {
-                break;
-            }
             printf("%s:%d -%s - ", message_udp.ip, message_udp.sock, message_udp.topic);
-            fflush(stdout);
             if (strcmp(message_udp.data_t, "INT") == 0) {
                 printf("INT - %d\n", message_udp.case_int);
             }
@@ -171,12 +178,11 @@ int main(int argc, char *argv[]) {
             if (strcmp(message_udp.data_t, "STRING") == 0) {
                 printf("STRING - %s\n", message_udp.case_string);
             }
-            fflush(stdout);
 
         }
     }
 
-    //close(sockfd);
+    close(sockfd);
 
     return 0;
 }

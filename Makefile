@@ -2,7 +2,7 @@ CFLAGS = -Wall -g
 CC = gcc
 
 # Portul pe care asculta serverul
-PORT_SERVER = 8080
+PORT_SERVER = 6655
 
 # Adresa IP a serverului
 IP_SERVER = 127.0.0.1
