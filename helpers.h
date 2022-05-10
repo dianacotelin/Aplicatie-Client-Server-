@@ -52,7 +52,7 @@
 #define BUFLEN 1500
 #define MAX_CLIENTS 5
 #define ID_LEN 11
-#define MSG_LEN 51
+#define MSG_LEN 50
 #define INFO_LEN 1500
 #define MAX_CLIENTS_NO 10
 #define TOPICS_LEN 10000
@@ -83,11 +83,11 @@ typedef struct tcp_client {
 
 typedef struct subscriber{
     tcp_client client;
-    topic topics[1000];
+    topic topics[MSG_LEN];
     int nr_topics;
 } subscriber;
 
-
+// Folosit pentru coada de mesaje
 typedef struct message_tcp {
     struct sockaddr_in client_addr;
     char topic[MSG_LEN];

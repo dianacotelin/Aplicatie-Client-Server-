@@ -41,10 +41,12 @@ int find_topic_index (char *topic, int nr_topics, subscriber subscriber) {
     }
     return -1;
 }
-void add_topic (char **topics, char *topic) {
+char** add_topic (char **topics, char topic[50]) {
 
     strcpy(topics[topics_len], topic);
     topics_len++;
+    return topics;
+    //printf("%s", topic);
 }
 
 int is_subsc (subscriber subsc, char *topic) {
@@ -57,12 +59,14 @@ int is_subsc (subscriber subsc, char *topic) {
     return 0;
 }
 
-void create_message(char* buffer, message msg, char ip[], int sock) {
+message create_message(char buffer[1551], char ip[11], int sock) {
+    message msg;
+    memset(&msg, 0, sizeof(msg));
+
     char topic_name[MSG_LEN];
     int type = buffer[50];
-
-    memset(topic_name, 0, MSG_LEN);
-    memcpy(topic_name, buffer, 50);
+    //printf("topic_name %s    ", topic_name);
+    strncpy(topic_name, buffer, 50);
     strcpy(msg.ip, ip);
     strcpy(msg.topic, topic_name);
     msg.sock = sock;
@@ -70,13 +74,13 @@ void create_message(char* buffer, message msg, char ip[], int sock) {
     if(type == 0) {
         uint32_t num;
         strcpy(msg.data_t, "INT");
-        num = (uint32_t)buffer[52] << 24 | (uint32_t)buffer[53] << 16 | (uint32_t)buffer[54] << 8 |
-                (uint32_t)buffer[55];
+        memset(&num, 0, sizeof(uint32_t));
+        memcpy(&num, buffer+52, sizeof(uint32_t));
         signed long long int aux = num;
         if (buffer[51] == 1) {
-            msg.case_int = -aux;
+            msg.case_int = (-1)* ntohl(num);
         } else {
-            msg.case_int = aux;
+            msg.case_int = ntohl(num);
         }
     }
 
@@ -110,6 +114,7 @@ void create_message(char* buffer, message msg, char ip[], int sock) {
         memset(msg.case_string, 0, 1500);
         memcpy(msg.case_string, buffer + 51, 1501);
     }
+    return msg;
 
 }
 
@@ -171,83 +176,80 @@ int main(int argc, char *argv[]) {
     } else {
         fdmax = sockfd_udp;
     }
-    char buffer[BUFLEN];
-    char id[ID_LEN];
+    char buffer[1551];
+ 
 
-    char **topics = (char**)malloc(max_number_of_topics * sizeof(char*));
+    char **topics = (char**)calloc(max_number_of_topics, sizeof(char*));
     subscriber *subscribers = calloc(100, sizeof(subscriber));
     for (int i = 0; i < max_number_of_topics; i++) {
-        topics[i] = (char*)malloc(50*sizeof(char));
+        topics[i] = (char*)calloc(51, sizeof(char));
     }
-
+    int forever = 1;
     while(1) {
         tmp_fds = read_fds;
         ret = select(fdmax + 1, &tmp_fds, NULL, NULL, NULL);
         DIE(ret < 0, "select");
-
         // STDIN data
-        if (FD_ISSET(STDIN_FILENO, &tmp_fds)) {
-            memset(buffer, 0, BUFLEN);
-            fgets(buffer, BUFLEN - 1, stdin);
-            // exit command
-            if (strncmp(buffer, "exit", 4) == 0) {
-                for (int i = 3; i <= fdmax; i++) {
-                    if (FD_ISSET(i, &read_fds)) {
-                       // close(i);
+            if (FD_ISSET(STDIN_FILENO, &tmp_fds)) {
+                memset(buffer, 0, BUFLEN);
+                fgets(buffer, BUFLEN - 1, stdin);
+                // exit command
+                if (strncmp(buffer, "exit", 4) == 0) {
+                    for (int i = 0; i <= fdmax; i++) {
+                        if (i != sockfd_tcp && i != STDIN_FILENO && i != sockfd_udp) {
+                            shutdown(i, SHUT_RDWR);
+                            close(i);
+                        }
                     }
+                    break;
+                    
                 }
-                break;
             }
-        }
-
-        // UDP CLIENTS
-        if (FD_ISSET(sockfd_udp, &tmp_fds)) {
-            memset(buffer, 0, BUFLEN);
-            clilen = sizeof(cli_addr);
-            ret = recvfrom(sockfd_udp, buffer, sizeof(buffer), 0,(struct sockaddr *)&cli_addr, &clilen);
-            DIE(ret < 0, "recvfrom");
-
             
-            message msg_udp;
-            create_message(buffer, msg_udp, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
+        for (int i = 0; i<= fdmax; i++) {
+            // Client UDP
+            if (FD_ISSET(sockfd_udp, &tmp_fds)) {
+                memset(buffer, 0, BUFLEN);
+                clilen = sizeof(cli_addr);
+                ret = recvfrom(sockfd_udp, buffer, 1551, 0,(struct sockaddr *)&cli_addr, &clilen);
+                DIE(ret < 0, "recvfrom");
 
+                
+                message msg_udp;
+                msg_udp = create_message(buffer, inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
 
-            message_tcp msg_tcp;
-            memset(&msg_tcp, 0, sizeof(message_tcp));
-            msg_tcp.client_addr = cli_addr;
-            memcpy(&(msg_tcp.topic), &(msg_udp.topic), sizeof(message));
+                
+                message_tcp msg_tcp;
+                memset(&msg_tcp, 0, sizeof(message_tcp));
+                msg_tcp.client_addr = cli_addr;
+                strcpy(msg_tcp.topic, msg_udp.topic);
+                // Se cauta topicul si daca nu exista se adauga
+                if (! find_topic(topics, msg_udp.topic)) {
+                    topics = add_topic(topics, msg_udp.topic);
+                } else {
+                    // Se trimite mesaj catre subscriberii topicului
+                    for (int i = 0; i < subscribers_len; i++) {
+                        if (is_subsc (subscribers[i], msg_udp.topic)){
+                            if (subscribers[i].client.status == 1) {
+                                ret = send(subscribers[i].client.sockfd, &msg_udp, sizeof(msg_udp), 0);
+                                DIE(ret < 0, "sendmsg");
 
-            // Search the topic, and add it if it dosen't exist
-            if (! find_topic(topics, msg_tcp.topic)) {
-                add_topic(topics, msg_tcp.topic);
-            } else {
-                // Send messages to the subscribers of this topic
-                for (int i = 0; i < subscribers_len; i++) {
-                    if (is_subsc (subscribers[i], msg_udp.topic)){
-                        if (subscribers[i].client.status == 1) {
-                            ret = send(subscribers[i].client.sockfd, &msg_udp, sizeof(msg_udp), 0);
-                            DIE(ret < 0, "sendmsg");
-
-                        } else if (subscribers[i].client.status == 0) {
-                            for (int j = 0; j < subscribers->nr_topics; j++) {
-                                if (strcmp (subscribers[i].topics[j].topic, msg_udp.topic) == 0) {
-                                    if (subscribers[i].topics[j].sf == 1) {
-                                        message_tcp *copy =(message_tcp *)calloc(1, sizeof(message_tcp));
-                                        memcpy(copy, &msg_tcp, sizeof(message_tcp));
-                                        queue_enq(subscribers[i].client.messages, copy);
+                            } else if (subscribers[i].client.status == -1) {
+                                for (int j = 0; j < subscribers->nr_topics; j++) {
+                                    if (strcmp (subscribers[i].topics[j].topic, msg_udp.topic) == 0) {
+                                        if (subscribers[i].topics[j].sf == 1) {
+                                            message_tcp *copy =(message_tcp *)calloc(1, sizeof(message_tcp));
+                                            memcpy(copy, &msg_tcp, sizeof(message_tcp));
+                                            queue_enq(subscribers[i].client.messages, copy);
+                                        }
                                     }
                                 }
-                            }
 
+                            }
                         }
                     }
                 }
             }
-
-
-        } else {
-            // Client TCP
-            for (int i = 0; i<= fdmax; i++) {
                 if (FD_ISSET(i, &tmp_fds)) {
                     if (i == sockfd_tcp) {
                         // cerere de conexiune pe socket inactiv (listen)
@@ -280,13 +282,11 @@ int main(int argc, char *argv[]) {
                             subscribers_len++;
 
                             strcpy(subscribers[subscribers_len-1].client.id, buffer);
-                            subscribers[subscribers_len -1].client.sockfd = sockfd_tcp;
+                            subscribers[subscribers_len -1].client.sockfd = newsockfd;
                             subscribers[subscribers_len -1].client.status = 1;
                             subscribers[subscribers_len -1].nr_topics = 0;
                             subscribers[subscribers_len -1].client.messages = queue_create();
                             printf("New client %s connected from %s:%i.\n", subscribers[subscribers_len-1].client.id, inet_ntoa(cli_addr.sin_addr), cli_addr.sin_port);
-
-                            
                             
                         } else if (status == -1) {
                             // client reconectat
@@ -302,64 +302,63 @@ int main(int argc, char *argv[]) {
 
                         } else if (status == 1) {
                             printf("Client %s already connected.\n", buffer);
-                            strcpy(buffer, "quit");
-                            ret = send(newsockfd, buffer, sizeof(buffer), 0);
-                            DIE(ret < 0, "send");
                         }
 
                         
 
-                    } else if (i!=STDIN_FILENO) {
+                    } else {
                         // s-au primit date pe unul din socketii de client,
                         // asa ca serverul le receptioneaza
 
                         memset(buffer, 0, BUFLEN);
                         n = recv(i, buffer, sizeof(buffer), 0);
                         DIE(n < 0, "recv");
-
+                        
                         if (n == 0) {
                             int found;
-
+                            
                             for (int j = 0; j < subscribers_len; j++) {
                                 if (i == subscribers[j].client.sockfd) {
-                                    found = j;
+                                    printf("Client %s disconnected.\n", subscribers[j].client.id);
+                                    subscribers[j].client.status = -1;
+                                    break;
                                 }
                             }
-                            subscribers[found].client.status = -1;
-                            //close(i);
+                            
+                            close(i);
                             FD_CLR(i, &read_fds);
-                            printf("Client %s disconnected.\n", subscribers[found].client.id);
 
                         } else {
-                            topic *new_top = (topic *) malloc(sizeof(topic*));
-                            if (strncmp(buffer, "subscribe", strlen("subscribe") == 0)) {
-                                strncpy(new_top->topic, buffer, strlen(buffer) - 3);
+                            topic new_top;
+                            if (strchr(buffer, ' ')) {
+                                // Cerere subscribe
+                                strncpy(new_top.topic, buffer, strlen(buffer) - 2);
                                 char sf[2];
-                                sf[0] = buffer[strlen(buffer) - 2];
+                                sf[0] = buffer[strlen(buffer) - 1];
                                 sf[1] = '\0';
-                                new_top->sf = atoi(sf);
-                                if (find_topic(topics, new_top->topic) == 0) {
-                                    add_topic(topics, new_top->topic);
+                                new_top.sf = atoi(sf);
+                                if (find_topic(topics, new_top.topic) == 0) {
+                                    topics = add_topic(topics, new_top.topic);
                                 }
 
                                 for (int j = 0; j < subscribers_len; j++) {
                                     if (subscribers[j].client.sockfd == i) {
-                                        if (is_subsc(subscribers[j], new_top->topic) == 0) {
+                                        if (is_subsc(subscribers[j], new_top.topic) == 0) {
                                             int aux_nr = subscribers[j].nr_topics;
                                             subscribers[j].nr_topics ++;
-                                            strcpy(subscribers[j].topics[aux_nr].topic, new_top->topic);
-                                            subscribers[j].topics[aux_nr].sf = new_top->sf;
+                                            strncpy(subscribers[j].topics[aux_nr].topic, new_top.topic, strlen(new_top.topic));
+                                            subscribers[j].topics[aux_nr].sf = new_top.sf;
                                           
                                         }
                                         break;
                                     }
                                 }
 
-                            } else if (strncmp(buffer, "unsubscribe", strlen("unsubscribe") == 0)) {
+                            } else {
                                 for (int j = 0; j < subscribers_len; j++) {
                                     if (subscribers[j].client.sockfd == i) {
-                                        if (is_subsc(subscribers[j], new_top->topic) == 0) {
-                                            int index = find_topic_index(new_top->topic, subscribers[j].nr_topics, subscribers[j]);
+                                        if (is_subsc(subscribers[j], new_top.topic) == 0) {
+                                            int index = find_topic_index(new_top.topic, subscribers[j].nr_topics, subscribers[j]);
                                             if (index >= 0) {
                                                 for (int k = index; k < subscribers[j].nr_topics -1; k++) {
                                                     subscribers[j].topics[k] = subscribers[j].topics[k +1]; 
@@ -377,19 +376,16 @@ int main(int argc, char *argv[]) {
 
 
                 }
-            }
+            
         }
     }
-    for (int i = 0; i < subscribers_len; i++) {
-        free(subscribers[i].topics);
-    }
+    close(sockfd_tcp);
     free (subscribers);
-    for (int i = 0; i < topics_len; i++) {
+    for (int i = 0; i < 100; i++) {
         free(topics[i]);
     }
     free (topics);
-    //close (sockfd_tcp);
-    //close (sockfd_udp);
+
 
 
 

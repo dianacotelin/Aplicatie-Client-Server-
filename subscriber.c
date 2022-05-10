@@ -34,10 +34,10 @@ int check_message(char* buffer, char* command) {
         return -1;
     }
     if (strcmp(token, "subscribe") == 0) {
-        strcpy(command, "subscribe");
+        
         check = 0;
     } else if (strcmp(token, "unsubscribe") == 0) {
-        strcpy(command, "unsubscribe");
+        
         check = 1;
     } else {
         errors();
@@ -53,8 +53,8 @@ int check_message(char* buffer, char* command) {
         errors();
         return -1;
     }
-    strcat(command, " ");
-    strcat(command, token);
+    
+    strcpy(command, token);
 
     if (check == 0) {
         token = strtok(NULL, " ");
@@ -119,17 +119,9 @@ int main(int argc, char *argv[]) {
     FD_SET(sockfd, &read_fds);
 
     fd_max = sockfd;
-    //printf("%s", id);
     ret = send(sockfd, argv[1], 10, 0);
     DIE (ret < 0, "send");
-    
-    ret = recv(sockfd, buffer, BUFLEN, 0);
-    DIE (ret < 0, "recv");
 
-    if (strncmp (buffer, "quit", strlen("quit")) == 0) {
-        close(sockfd);
-        return 0;
-    }
 
     char messageS[BUFLEN];
 
@@ -139,15 +131,19 @@ int main(int argc, char *argv[]) {
         ret = select(sockfd + 1, &tmp_fds, NULL, NULL, NULL);
         DIE(ret < 0, "select");
         if (FD_ISSET(STDIN_FILENO, &tmp_fds)) {
-            memset(buffer, 0, BUFLEN);
-            fgets(buffer, BUFLEN - 1, stdin);
+            memset(buffer, 0, 100);
+            fgets(buffer,100, stdin);
 
             if (strncmp(buffer, "exit", 4) == 0) {
+                
+                ret = send(sockfd, 0, 0, 0);
+                DIE(ret < 0, "send");
+                shutdown(sockfd, SHUT_RDWR);
                 break;
             }
 
             int checkk = check_message(buffer, messageS);
-
+            // Verificare cere de subscribe / unsubscribe
             if (checkk >= 0) {
                 ret = send(sockfd, &messageS, sizeof(messageS), 0);
                 DIE(ret < 0, "send");
@@ -159,29 +155,34 @@ int main(int argc, char *argv[]) {
                     fflush(stdout);
                 }
             }
-        }
-        if (FD_ISSET(sockfd, &tmp_fds)) {
+        } else if (FD_ISSET(sockfd, &tmp_fds)) {
             // Date de la server
             message message_udp;
             ret = recv(sockfd, &message_udp, sizeof(message), 0);
             DIE(ret < 0, "receive");
-            printf("%s:%d -%s - ", message_udp.ip, message_udp.sock, message_udp.topic);
-            if (strcmp(message_udp.data_t, "INT") == 0) {
-                printf("INT - %d\n", message_udp.case_int);
+            if (ret == 0) {
+                // Se inchide subscriberul
+                break;
             }
-            if (strcmp(message_udp.data_t, "FLOAT") == 0) {
-                printf("FLOAT - %lf\n", message_udp.case_float);
-            }
-            if (strcmp(message_udp.data_t, "SHORT_REAL") == 0) {
-                printf("SHORT_REAL - %f\n", (double)message_udp.case_short);
-            }
-            if (strcmp(message_udp.data_t, "STRING") == 0) {
-                printf("STRING - %s\n", message_udp.case_string);
-            }
+                printf("%s:%d -%s - ", message_udp.ip, message_udp.sock, message_udp.topic);
+                if (strcmp(message_udp.data_t, "INT") == 0) {
+                    printf("INT - %d\n", message_udp.case_int);
+                }
+                if (strcmp(message_udp.data_t, "FLOAT") == 0) {
+                    printf("FLOAT - %lf\n", message_udp.case_float);
+                }
+                if (strcmp(message_udp.data_t, "SHORT_REAL") == 0) {
+                    printf("SHORT_REAL - %f\n", (double)message_udp.case_short);
+                }
+                if (strcmp(message_udp.data_t, "STRING") == 0) {
+                    printf("STRING - %s\n", message_udp.case_string);
+                }
+            
 
         }
     }
 
+    shutdown(sockfd, 2);
     close(sockfd);
 
     return 0;
