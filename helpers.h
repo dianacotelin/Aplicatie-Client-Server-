@@ -52,16 +52,21 @@
 #define BUFLEN 1500
 #define MAX_CLIENTS 5
 #define ID_LEN 11
-#define MSG_LEN 50
+#define MSG_LEN 51
 #define INFO_LEN 1500
 #define MAX_CLIENTS_NO 10
 #define TOPICS_LEN 10000
 #define MAX_SUBSCRIBERS 1000
 
-typedef struct message{
+typedef struct message {
+    int sock;
     char topic[MSG_LEN];
-    uint8_t data_t;
-    char info[INFO_LEN];
+    char ip[16];
+    char data_t[20];
+    int case_int;
+    uint16_t case_short;
+    float case_float;
+    char case_string[INFO_LEN];
 }message;
 
 typedef struct topic {
@@ -78,7 +83,7 @@ typedef struct tcp_client {
 
 typedef struct subscriber{
     tcp_client *client;
-    topic *topics;
+    topic topics[1000];
     int nr_topics;
 } subscriber;
 

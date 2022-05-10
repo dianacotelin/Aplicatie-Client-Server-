@@ -108,11 +108,12 @@ int main(int argc, char *argv[]) {
     // Dezactivare alg Naglae
     int flag = 1;
     int res;
-    res = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
-    DIE(res < 0, "Naglae");
 
     ret = connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr));
     DIE(ret < 0, "connect");
+
+    res = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    DIE(res < 0, "Naglae");
 
     FD_SET(STDIN_FILENO, &read_fds);
     FD_SET(sockfd, &read_fds);
